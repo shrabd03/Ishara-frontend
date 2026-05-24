@@ -18,7 +18,6 @@ type ApiUser = {
 
 const SESSION_CACHE = "ishara_session_v2";
 
-/* ✅ FIX 1: حماية من undefined */
 function mapApiUser(u?: ApiUser): User {
   if (!u) {
     return {
@@ -64,8 +63,12 @@ function readCache(): User | null {
   }
 }
 
-const BASE = import.meta.env.BASE_URL.replace(/\/$/, "");
-const API = `${BASE}/api`;
+// ❌ DELETE these 2 lines:
+// const BASE = import.meta.env.BASE_URL.replace(/\/$/, "");
+// const API = `${BASE}/api`;
+
+// ✅ ADD this 1 line instead:
+const API = (import.meta.env.VITE_API_URL ?? "").replace(/\/$/, "") + "/api";
 
 async function apiFetch<T>(
   path: string,
@@ -96,7 +99,6 @@ export function useAuth() {
   useEffect(() => {
     apiFetch<{ user: ApiUser }>("/auth/me")
       .then(({ data, status }) => {
-        /* ✅ FIX 2 */
         if (data?.user) {
           const mapped = mapApiUser(data.user);
           cacheUser(mapped);
@@ -117,7 +119,6 @@ export function useAuth() {
 
     if (error) return error;
 
-    /* ✅ FIX 3 */
     if (data?.user) {
       const mapped = mapApiUser(data.user);
       cacheUser(mapped);
@@ -145,7 +146,6 @@ export function useAuth() {
 
     if (error) return error;
 
-    /* ✅ FIX 4 */
     if (data?.user) {
       const mapped = mapApiUser(data.user);
       cacheUser(mapped);
@@ -163,7 +163,6 @@ export function useAuth() {
       body: JSON.stringify({ username: updates.name }),
     });
 
-    /* ✅ FIX 5 */
     if (data?.user) {
       const mapped = mapApiUser(data.user);
       cacheUser(mapped);
