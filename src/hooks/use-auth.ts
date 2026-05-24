@@ -17,20 +17,13 @@ type ApiUser = {
 };
 
 const SESSION_CACHE = "ishara_session_v2";
+const TOKEN_KEY = "ishara_token";                        // ← NEW
 
 function mapApiUser(u?: ApiUser): User {
   if (!u) {
-    return {
-      id: 0,
-      name: "",
-      email: "",
-      dob: undefined,
-      joinedISO: "",
-    };
+    return { id: 0, name: "", email: "", dob: undefined, joinedISO: "" };
   }
-
   let dob: User["dob"] | undefined;
-
   if (u.dateOfBirth) {
     const [year, month, day] = u.dateOfBirth.split("-");
     dob = {
@@ -39,7 +32,6 @@ function mapApiUser(u?: ApiUser): User {
       year,
     };
   }
-
   return {
     id: u.id,
     name: u.username,
@@ -63,11 +55,11 @@ function readCache(): User | null {
   }
 }
 
-// ❌ DELETE these 2 lines:
-// const BASE = import.meta.env.BASE_URL.replace(/\/$/, "");
-// const API = `${BASE}/api`;
+// ← NEW: token helpers
+function saveToken(t: string) { localStorage.setItem(TOKEN_KEY, t); }
+function clearToken() { localStorage.removeItem(TOKEN_KEY); }
+function getToken(): string | null { return localStorage.getItem(TOKEN_KEY); }
 
-// ✅ ADD this 1 line instead:
 const API = (import.meta.env.VITE_API_URL ?? "").replace(/\/$/, "") + "/api";
 
 async function apiFetch<T>(
@@ -75,16 +67,25 @@ async function apiFetch<T>(
   options?: RequestInit,
 ): Promise<{ data?: T; error?: string; status: number }> {
   try {
+    // ← NEW: attach token as Authorization header if available
+    const token = getToken();
+    const authHeader = token ? { Authorization: `Bearer ${token}` } : {};
+
     const res = await fetch(`${API}${path}`, {
       credentials: "include",
-      headers: { "Content-Type": "application/json" },
+      headers: {
+        "Content-Type": "application/json",
+        ...authHeader,                                   // ← NEW
+      },
       ...options,
     });
     const json = await res.json().catch(() => ({}));
     if (!res.ok)
       return {
         status: res.status,
-        error: (json as { error?: string }).error ?? "Something went wrong",
+        error: (json as { error?: string; detail?: string }).error
+          ?? (json as { detail?: string }).detail        // ← NEW: handle FastAPI error format
+          ?? "Something went wrong",
       };
     return { status: res.status, data: json as T };
   } catch {
@@ -105,6 +106,7 @@ export function useAuth() {
           setUser(mapped);
         } else if (status === 401) {
           cacheUser(null);
+          clearToken();                                  // ← NEW
           setUser(null);
         }
       })
@@ -112,13 +114,14 @@ export function useAuth() {
   }, []);
 
   const login = async (email: string, password: string): Promise<string | null> => {
-    const { data, error } = await apiFetch<{ user: ApiUser }>("/auth/login", {
+    const { data, error } = await apiFetch<{ user: ApiUser; token: string }>("/auth/login", {
       method: "POST",
       body: JSON.stringify({ email, password }),
     });
 
     if (error) return error;
 
+    if (data?.token) saveToken(data.token);              // ← NEW
     if (data?.user) {
       const mapped = mapApiUser(data.user);
       cacheUser(mapped);
@@ -139,13 +142,14 @@ export function useAuth() {
         ? `${dob.year}-${String(dob.month).padStart(2, "0")}-${String(dob.day).padStart(2, "0")}`
         : undefined;
 
-    const { data, error } = await apiFetch<{ user: ApiUser }>("/auth/register", {
+    const { data, error } = await apiFetch<{ user: ApiUser; token: string }>("/auth/register", {
       method: "POST",
       body: JSON.stringify({ email, username: name, password, dateOfBirth }),
     });
 
     if (error) return error;
 
+    if (data?.token) saveToken(data.token);              // ← NEW
     if (data?.user) {
       const mapped = mapApiUser(data.user);
       cacheUser(mapped);
@@ -157,12 +161,10 @@ export function useAuth() {
 
   const updateProfile = async (updates: Partial<Pick<User, "name">>) => {
     if (!user) return;
-
     const { data } = await apiFetch<{ user: ApiUser }>("/auth/me", {
       method: "PATCH",
       body: JSON.stringify({ username: updates.name }),
     });
-
     if (data?.user) {
       const mapped = mapApiUser(data.user);
       cacheUser(mapped);
@@ -173,6 +175,7 @@ export function useAuth() {
   const logout = async () => {
     await apiFetch("/auth/logout", { method: "POST" });
     cacheUser(null);
+    clearToken();                                        // ← NEW
     setUser(null);
   };
 
